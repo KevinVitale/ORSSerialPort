@@ -254,7 +254,7 @@ static __strong NSMutableArray *allSerialPorts;
 {
 	if (self.isOpen) return;
 	
-	dispatch_queue_t mainQueue = dispatch_get_main_queue();
+    dispatch_queue_t targetQueue = dispatch_get_current_queue();
 
 	int descriptor=0;
 	descriptor = open([self.path cStringUsingEncoding:NSASCIIStringEncoding], O_RDWR | O_NOCTTY | O_EXLOCK | O_NONBLOCK);
@@ -281,7 +281,7 @@ static __strong NSMutableArray *allSerialPorts;
 	[self setPortOptions];
 	[self updateModemLines];
 
-	dispatch_async(mainQueue, ^{
+	dispatch_async(targetQueue, ^{
 		if ([self.delegate respondsToSelector:@selector(serialPortWasOpened:)])
 		{
 			[self.delegate serialPortWasOpened:self];
@@ -335,11 +335,11 @@ static __strong NSMutableArray *allSerialPorts;
 		BOOL DCDPin = (modemLines & TIOCM_CAR) != 0;
 		
 		if (CTSPin != self.CTS)
-			dispatch_sync(mainQueue, ^{self.CTS = CTSPin;});
+			dispatch_sync(targetQueue, ^{self.CTS = CTSPin;});
 		if (DSRPin != self.DSR)
-			dispatch_sync(mainQueue, ^{self.DSR = DSRPin;});
+			dispatch_sync(targetQueue, ^{self.DSR = DSRPin;});
 		if (DCDPin != self.DCD)
-			dispatch_sync(mainQueue, ^{self.DCD = DCDPin;});
+			dispatch_sync(targetQueue, ^{self.DCD = DCDPin;});
 	});
 	self.pinPollTimer = timer;
 	dispatch_resume(self.pinPollTimer);
@@ -380,7 +380,7 @@ static __strong NSMutableArray *allSerialPorts;
 	
 	if ([self.delegate respondsToSelector:@selector(serialPortWasClosed:)])
 	{
-		[(id)self.delegate performSelectorOnMainThread:@selector(serialPortWasClosed:) withObject:self waitUntilDone:YES];
+        [(id)self.delegate performSelector:@selector(serialPortWasClosed:) withObject:self];
 		dispatch_async(self.requestHandlingQueue, ^{
 			self.requestsQueue = [NSMutableArray array]; // Cancel all queued requests
 			self.pendingRequest = nil; // Discard pending request
@@ -398,7 +398,7 @@ static __strong NSMutableArray *allSerialPorts;
 {
 	if ([self.delegate respondsToSelector:@selector(serialPortWasRemovedFromSystem:)])
 	{
-		[(id)self.delegate performSelectorOnMainThread:@selector(serialPortWasRemovedFromSystem:) withObject:self waitUntilDone:YES];
+        [(id)self.delegate performSelector:@selector(serialPortWasRemovedFromSystem:) withObject:self];
 	}
 	[self close];
 }
@@ -569,13 +569,14 @@ static __strong NSMutableArray *allSerialPorts;
 
 - (void)receiveData:(NSData *)data;
 {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		if ([self.delegate respondsToSelector:@selector(serialPort:didReceiveData:)])
-		{
-			[self.delegate serialPort:self didReceiveData:data];
-		}
-	});
-	
+    dispatch_queue_t targetQueue = ([NSThread isMainThread] ? dispatch_get_main_queue() : dispatch_get_current_queue());
+    dispatch_async(targetQueue, ^{
+        if ([self.delegate respondsToSelector:@selector(serialPort:didReceiveData:)])
+        {
+            [self.delegate serialPort:self didReceiveData:data];
+        }
+    });
+
 	dispatch_async(self.requestHandlingQueue, ^{
 		const void *bytes = [data bytes];
 		for (NSUInteger i=0; i<[data length]; i++) {
@@ -594,7 +595,7 @@ static __strong NSMutableArray *allSerialPorts;
 				if (![completePacket length]) continue;
 				
 				// Complete packet received, so notify delegate then clear buffer
-				dispatch_async(dispatch_get_main_queue(), ^{
+				dispatch_async(targetQueue, ^{
 					if ([self.delegate respondsToSelector:@selector(serialPort:didReceivePacket:matchingDescriptor:)])
 					{
 						[self.delegate serialPort:self didReceivePacket:completePacket matchingDescriptor:descriptor];
