@@ -281,17 +281,14 @@ static __strong NSMutableArray *allSerialPorts;
 	[self setPortOptions];
 	[self updateModemLines];
 
-	dispatch_async(targetQueue, ^{
-		if ([self.delegate respondsToSelector:@selector(serialPortWasOpened:)])
-		{
-			[self.delegate serialPortWasOpened:self];
-		}
-	});
+    if ([self.delegate respondsToSelector:@selector(serialPortWasOpened:)])
+    {
+        [self.delegate serialPortWasOpened:self];
+    }
 
 	// Start a read dispatch source in the background
-	dispatch_source_t readPollSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, self.fileDescriptor, 0, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
+	dispatch_source_t readPollSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, self.fileDescriptor, 0, targetQueue);
 	dispatch_source_set_event_handler(readPollSource, ^{
-		
 		int localPortFD = self.fileDescriptor;
 		if (!self.isOpen) return;
 		
@@ -569,45 +566,10 @@ static __strong NSMutableArray *allSerialPorts;
 
 - (void)receiveData:(NSData *)data;
 {
-    dispatch_queue_t targetQueue = ([NSThread isMainThread] ? dispatch_get_main_queue() : dispatch_get_current_queue());
-    dispatch_async(targetQueue, ^{
-        if ([self.delegate respondsToSelector:@selector(serialPort:didReceiveData:)])
-        {
-            [self.delegate serialPort:self didReceiveData:data];
-        }
-    });
-
-	dispatch_async(self.requestHandlingQueue, ^{
-		const void *bytes = [data bytes];
-		for (NSUInteger i=0; i<[data length]; i++) {
-			
-			NSData *byte = [NSData dataWithBytesNoCopy:(void *)(bytes+i) length:1 freeWhenDone:NO];
-			
-			// Check for packets we're listening for
-			for (ORSSerialPacketDescriptor *descriptor in self.packetDescriptorsAndBuffers)
-			{
-				// Append byte to buffer
-				ORSSerialBuffer *buffer = [self.packetDescriptorsAndBuffers objectForKey:descriptor];
-				[buffer appendData:byte];
-				
-				// Check for complete packet
-				NSData *completePacket = [descriptor packetMatchingAtEndOfBuffer:buffer.data];
-				if (![completePacket length]) continue;
-				
-				// Complete packet received, so notify delegate then clear buffer
-				dispatch_async(targetQueue, ^{
-					if ([self.delegate respondsToSelector:@selector(serialPort:didReceivePacket:matchingDescriptor:)])
-					{
-						[self.delegate serialPort:self didReceivePacket:completePacket matchingDescriptor:descriptor];
-					}
-				});
-				[buffer clearBuffer];
-			}
-			
-			// Also check for response to pending request
-			[self checkResponseToPendingRequestAndContinueIfValidWithReceivedByte:byte];
-		}
-	});
+    if ([self.delegate respondsToSelector:@selector(serialPort:didReceiveData:)])
+    {
+        [self.delegate serialPort:self didReceiveData:data];
+    }
 }
 
 #pragma mark Port Propeties Methods
